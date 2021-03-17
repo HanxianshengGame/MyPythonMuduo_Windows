@@ -7,6 +7,7 @@
 
 
 import struct
+import json
 
 
 def int_to_bytes(convert_val):
@@ -53,39 +54,6 @@ def send_fixed_sz_data(sock, data):
     pass
 
 
-# decode 解包
-def recv_msg_from_client(sock):
-    """
-    TODO 涉及拆包的逻辑
-    :param sock:
-    :return:
-    """
-    len_data = recv_fixed_sz_data(sock, 4)
-    if not len_data:
-        return None
-    data_len = bytes_to_int(len_data)
-
-    msg_data = recv_fixed_sz_data(sock, data_len)
-    if not msg_data:
-        return None
-    msg = bytes_to_str(msg_data, data_len)
-    return msg
-
-
-# encode 装包
-def send_msg_to_client(sock, msg):
-    """
-    涉及装包的逻辑
-    :param sock:
-    :param msg:
-    :return:
-    """
-    msg_data = str_to_bytes(msg)
-    len_data = int_to_bytes(len(msg_data))
-    send_fixed_sz_data(sock, len_data + msg_data)
-    pass
-
-
 def recv_flag(read_sock):
     flag_data = recv_fixed_sz_data(read_sock, 4)
     return bytes_to_int(flag_data)
@@ -96,9 +64,84 @@ def send_flag(write_sock, flag):
     send_fixed_sz_data(write_sock, flag_data)
 
 
+class JsonDataResponseEntity:
+    def __init__(self, actionCode, data):
+        self.actionCode = actionCode
+        self.data = data
+        pass
+
+
+class JsonDataRequestEntity:
+    def __init__(self, requestCode, actionCode, data):
+        self.requestCode = requestCode
+        self.actionCode = actionCode
+        self.data = data
+        pass
+
+def handle(dict_obj):
+    return JsonDataRequestEntity(dict_obj['requestCode'],
+        dict_obj['actionCode'],
+        dict_obj['data'])
+
+class MessageHandler:
+
+    def __init__(self):
+        self.__data = bytearray()
+        self.__end_index = 0
+        self.__msgs = []
+        pass
+
+    def append_new_data(self, data):
+        self.__data.extend(data)
+        self.__end_index += len(data)
+
+
+    def decode_message_data(self):
+        while True:
+            if self.__end_index <= 4:
+                break
+            msg_len = bytes_to_int(self.__data[0:4])
+            if self.__end_index - 4 >= msg_len:
+
+                json_str = bytes_to_str(self.__data[4: 4 + msg_len], msg_len)
+                print 'json_data_request_entity: ', json_str
+                json_data_request_entity = json.loads(json_str, object_hook=handle)
+                request_code = json_data_request_entity.requestCode
+                action_code = json_data_request_entity.actionCode
+                data = json_data_request_entity.data
+                # request_code = bytes_to_int(self.__data[4:8])
+                # action_code = bytes_to_int(self.__data[8:12])
+                # data_len = msg_len - 8
+                # data = bytes_to_str(self.__data[12: 12 + data_len], data_len)
+                # task 处理的 msg格式 (request_code, action_code, data)
+                self.__msgs.append((request_code, action_code, data))
+                self.__data = self.__data[4 + msg_len:]
+                self.__end_index -= (4 + msg_len)
+            else:
+                break
+        result_msgs = self.__msgs
+        self.__msgs = []
+        return result_msgs
+
+    @classmethod
+    def encode_msg_data(cls, msg):
+        action_code = msg[0]
+        data = msg[1]
+        json_data_response_entity = JsonDataResponseEntity(action_code, data)
+        json_str = json.dumps(json_data_response_entity, default=lambda obj: obj.__dict__,
+            sort_keys=True)
+        # action_code_bytes = int_to_bytes(action_code)
+        # data_bytes = str_to_bytes(data)
+        print 'json_data_response_entity: ', json_str
+        data_bytes = str_to_bytes(json_str)
+        len_bytes = int_to_bytes(len(data_bytes))
+        return len_bytes + data_bytes
+
+
 class Flag:
     ADD_NEW_CONN_EVENT = 0
     SEND_MSG_TO_CLIENT = 1
+    BUFFER_SIZE = 1024
 
     def __init__(self):
         pass
